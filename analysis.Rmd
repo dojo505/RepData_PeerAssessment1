@@ -1,0 +1,132 @@
+---
+title: "Reproducible Research Programming Assignment 1"
+output: html_document
+---
+
+### Create and Publish a R Markdown document which performs a reproducible and well-documented analysis of personal activity data
+
+The file, "activity.csv", contains the number of steps taken for each 5 minute period over a 2 month time frame. We would like to process the data and then analyze the data. 
+
+### Tasks:
+Perform the following calculations and visualizations:
+
+1. Histogram of the total number of steps taken each day
+2. Mean and median number of steps taken each day
+3. Time series plot of the average number of steps taken
+4. The 5-minute interval that, on average, contains the maximum number of steps
+5. Code to describe and show a strategy for imputing missing data
+6. Histogram of the total number of steps taken each day after missing values are imputed
+7. Panel plot comparing the average number of steps taken per 5-minute interval across weekdays and weekends
+
+```{r, echo=FALSE, message=FALSE}
+library(lattice)
+library(dplyr)
+```
+
+### Step 0: Read in the data to a dataframe, df:
+
+```{r}
+df <- read.csv("activity.csv", stringsAsFactors = FALSE)
+df$date <- as.Date(df$date)
+
+# Fix the interval column formatting:
+df$interval <- formatC(df$interval, width = 4, flag = "0")
+head(df, 3)
+```
+Over the two-month time frame there are `r length(df$steps)` measurements. We can also see that there are many missing values in the data, accounting for approximately `r round(sum(is.na(df$steps)) / length(df$steps) * 100, digits = 1)`% of the total data points. 
+
+### Step 1: Histogram for steps per day
+
+```{r}
+daily.df <- aggregate(df$steps, by = list(df$date), FUN = "sum")
+names(daily.df) = c("date", "steps")
+hist(daily.df$steps, breaks = 16, col = "red", main = "Histogram of Daily Steps", xlab = "Steps", xlim = c(0,25000))
+```
+
+Note that there are several days with no data at all (all missing values) which do not show up on the histogram.
+
+### Step 2: Mean and Median Number of Steps Each Day
+
+```{r}
+mn <- mean(daily.df$steps, na.rm = TRUE)
+md <- median(daily.df$steps, na.rm = TRUE)
+```
+
+The mean number of steps is `r format(mn, scientific = FALSE)` and the median value is `r md` steps.
+
+### Step 3: Time series plot of steps taken
+
+We want to know what the average day looks like. To do this, we simply group all the data by the time period. Since each day has 288 5-minute periods, the "average day" should also have 288 data points. 
+
+```{r}
+avgDay <- df[,c("interval","steps")] %>% group_by(interval) %>% summarise_all(funs(mean(., na.rm = TRUE)))
+
+# add column for time of day
+avgDay <- mutate(avgDay, Time = as.POSIXct(strptime(interval, "%H%M")))
+plot(steps ~ Time, data = avgDay, type = 'l')
+```
+
+### Step 4: Which interval contains the maximum number of steps on average?
+
+The data is in avgDay. Search for the max value and corresponding interval.
+
+```{r}
+avgDay[which.max(avgDay$steps),]
+```
+
+### Step 5: Strategy for Imputing missing data
+
+As mentioned above, many values are missing from the data set. For the purposes of data visualization and other analyses, we would like to fill in the missing values with a best estimate. 
+
+One simple strategy is to use the mean number of steps for a given time period, which was just calculated. This data is in avgDay. Thus, we go through the original data and replace missing values with the corresponding values from avgDay, rounded off to the nearest whole number. 
+
+```{r}
+df.original <- df   #preserve old df
+for (i in 1:nrow(df)) {
+    if (is.na(df[[i,"steps"]])){   ## if missing value
+        iVal <- df[[i,"interval"]]  ## which interval
+        ## replace with avg value
+        df[i,"steps"] <- round(avgDay[[which(avgDay$interval == 
+                                                 iVal),"steps"]])  
+    }
+}
+```
+
+### Step 6: Remake Histogram
+
+Plot histogram as before using the fixed data with imputed values. 
+
+```{r}
+daily.df2 <- aggregate(df$steps, by = list(df$date), FUN = "sum")
+names(daily.df2) = c("date", "steps")
+hist(daily.df2$steps, breaks = 16, col = "red", main = "Histogram of Daily Steps", xlab = "Steps", xlim = c(0,25000))
+```
+
+### Step 7: Plot 5-minute intervals comparing weekday to weekend
+
+First we will determine which days are weekends and add a column to our data frame. 
+
+```{r}
+df <- mutate(df, is.weekend = (weekdays(date) %in% c("Sunday", "Saturday")))
+```
+
+Now we will create an "average weekday" and an "average weekend" and plot both data sets. 
+
+```{r}
+avgWeekend <- df[df$is.weekend, c("interval", "steps")] %>% 
+    group_by(interval) %>% summarise_all(funs(mean))
+avgWeekend <- mutate(avgWeekend, day = "Weekend", Time = as.POSIXct(strptime(interval, "%H%M")))
+
+avgWeekday <- df[!(df$is.weekend), c("interval", "steps")] %>% 
+    group_by(interval) %>% summarise_all(funs(mean))
+avgWeekday <- mutate(avgWeekday, day = "Weekday", Time = as.POSIXct(strptime(interval, "%H%M")))
+
+df2 <- rbind(avgWeekday, avgWeekend)
+
+xyplot(steps ~ Time | day, data = df2, 
+       as.table = TRUE, type = 'l', layout = c(1,2), 
+       scales = list(x = list(format = "%H:%M")))
+```
+
+It must be noted that these final plot also include the imputed data which represents averages from **ALL** days. After seeing the differences, it would be wise to revisit our strategy for replacing missing data. Two data sets could be created, one for weekdays and one for weekends, and missing values would be filled in from the appropriate average day. 
+
